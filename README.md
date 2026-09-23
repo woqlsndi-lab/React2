@@ -2,6 +2,14 @@
 
 Next.js(App Router) 수업 정리 및 실습 저장소
 
+## 목차
+- [실행 방법](#실행-방법)
+- [실습 파일](#실습-파일)
+- [4주차 (2026-09-23)](#4주차-2026-09-23) — 중첩 라우트, 동적 세그먼트, 중첩 레이아웃, searchParams
+- [3주차 (2026-09-16)](#3주차-2026-09-16) — 라우트 그룹, 병렬·가로채기 라우팅, layout
+- [2주차 (2026-09-09)](#2주차-2026-09-09) — 프로젝트 수동 생성, 폴더 구조, 동적 라우팅
+- [1주차 (2026-09-02)](#1주차-2026-09-02) — Next.js, pnpm, 프로젝트 생성
+
 ## 실행 방법
 
 ```bash
@@ -13,13 +21,155 @@ pnpm dev
 
 ## 실습 파일
 
-| 주소 | 내용 | 파일 위치 |
+```
+src/app/
+├ layout.tsx              // 루트 레이아웃 (Home | Blog 메뉴)
+├ page.tsx                // /
+├ (marketing)/
+│ ├ layout.tsx
+│ └ about/page.tsx        // /about
+├ blog/
+│ ├ layout.tsx            // 블로그 레이아웃
+│ ├ page.tsx              // /blog         블로그 목록
+│ ├ posts.tsx             // 더미 데이터
+│ └ [slug]/page.tsx       // /blog/nextjs  블로그 상세
+└ products/
+  └ page.tsx              // /products?id=123&name=foo
+```
+
+---
+
+## 4주차 (2026-09-23)
+
+### 1. 중첩 라우트 (Nested Route)
+- 폴더를 중첩하면 경로도 중첩된다
+- 게시글별 경로가 필요하면 `blog` 안에 `[slug]` 폴더를 만들고 `page.tsx`를 추가
+- `blog/page.tsx`는 목록, `blog/[slug]/page.tsx`는 상세 페이지 역할을 맡는 게 일반적이다
+
+### 2. 동적 세그먼트 `[slug]`
+- 폴더 이름을 대괄호로 감싸면 **동적 세그먼트**가 된다
+- 하나의 `page.tsx`로 데이터 개수만큼 페이지를 만들 수 있다 (게시글, 상품 상세 등)
+- URL 값은 `params`로 전달된다 → `/blog/nextjs`면 `slug`는 `"nextjs"`
+
+더미 데이터 (`blog/posts.tsx`)
+
+```tsx
+export const posts = [
+  { slug: "nextjs", title: "Next.js 소개", content: "..." },
+  { slug: "routing", title: "App Router 알아보기", content: "..." },
+];
+```
+
+목록 페이지 (`blog/page.tsx`) — `map`으로 링크 목록 출력
+
+```tsx
+<ul>
+  {posts.map((post) => (
+    <li key={post.slug}>
+      <Link href={`/blog/${post.slug}`}>{post.title}</Link>
+    </li>
+  ))}
+</ul>
+```
+
+상세 페이지 (`blog/[slug]/page.tsx`)
+
+```tsx
+export default async function Posts({ params }: PageProps<"/blog/[slug]">) {
+  const { slug } = await params;   // params 해제
+  const post = posts.find((p) => p.slug === slug);
+
+  if (!post) {
+    return <h1>게시글을 찾을 수 없습니다!</h1>;
+  }
+
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </article>
+  );
+}
+```
+
+- `params`는 **Promise** → `async` 함수 안에서 `await`로 꺼낸다
+- `const { slug } = await params`는 아래와 같은 의미 (구조 분해 할당)
+  ```tsx
+  const resolved = await params;
+  const slug = resolved.slug;
+  ```
+- 타입에 Promise를 명시해 두면 `await`를 빼먹었을 때 TypeScript가 잡아준다
+- 데이터가 많아지면 `.find()`(O(n)) 대신 DB 쿼리로 바꿔야 한다
+
+### 3. 중첩 레이아웃 (Nesting Layouts)
+- `blog/layout.tsx`를 만들면 `/blog` 아래 모든 페이지에 적용된다
+- 루트 레이아웃이 블로그 레이아웃을 감싸고, 블로그 레이아웃이 목록·상세 페이지를 감싼다
+
+```
+Root Layout Header
+  Blog Layout Header
+    page 내용
+  Blog Layout Footer
+Root Layout Footer
+```
+
+> `<html>`, `<body>`는 **루트 레이아웃에만** 쓴다. 중첩 레이아웃에 또 넣으면
+> `<main> cannot contain a nested <html>` 오류가 난다 → 중첩 레이아웃은 `<div>` 등으로 감싸기
+
+### 4. Link 컴포넌트
+- `next/link`의 `<Link>`로 새로고침 없이 페이지 이동
+- 레이아웃의 `<nav>`에 넣으면 하위 모든 페이지의 공통 메뉴가 된다
+
+```tsx
+<nav>
+  <Link href="/">Home</Link> | <Link href="/blog">Blog</Link>
+</nav>
+```
+
+### 5. searchParams (검색 매개변수)
+- URL의 **쿼리 문자열**을 읽는 방법 → `/products?id=123&name=foo`
+- 페이지 컴포넌트의 props로 전달되며, `params`처럼 **Promise**
+
+```tsx
+export default async function ProductsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ id?: string; name?: string }>
+}) {
+  const { id = "non id", name = "non name" } = await searchParams;
+  return (
+    <div>
+      <h1>Products Page</h1>
+      <p>id : {id}</p>
+      <p>name : {name}</p>
+    </div>
+  )
+}
+```
+
+- `= "non id"`처럼 구조 분해할 때 **기본값**을 지정할 수 있다 (쿼리가 없을 때 사용)
+
+| | params | searchParams |
 | --- | --- | --- |
-| `/` | 루트 페이지 | `src/app/page.tsx` |
-| `/about` | 라우트 그룹 | `src/app/(marketing)/` |
-| `/blog` | 게시글 목록 | `src/app/blog/page.tsx` |
-| `/blog/[slug]` | 동적 라우트 | `src/app/blog/[slug]/page.tsx` |
-| - | 더미 데이터 | `src/app/posts.tsx` |
+| 가져오는 곳 | 동적 세그먼트 `[slug]` | 쿼리 문자열 `?key=value` |
+| 예시 | `/blog/nextjs` | `/products?id=123` |
+
+- 클라이언트 컴포넌트에서는 `useSearchParams()` 훅을 사용
+
+### 6. 정적 렌더링 vs 동적 렌더링
+- `searchParams`는 요청이 와야 값을 알 수 있어서, 사용하는 순간 그 페이지는 **동적 렌더링**이 된다
+
+| | 정적 (Static) | 동적 (Dynamic) |
+| --- | --- | --- |
+| 예시 | `/about`, `/blog` | `/products?page=2` |
+| 생성 시점 | 빌드 시 미리 생성 | 요청 시 생성 |
+| 특징 | 빠름, 캐시 가능 | 유연함, 요청마다 다른 응답 |
+
+### 7. React vs Next.js 라우팅
+| | React | Next.js |
+| --- | --- | --- |
+| 방식 | 코드에서 `<Route>`로 직접 정의 | 폴더·파일 구조로 자동 생성 |
+| 도구 | `react-router-dom` 등 외부 라이브러리 | 내장 파일 기반 라우팅 |
 
 ---
 

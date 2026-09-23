@@ -1,18 +1,17 @@
-import { notFound } from "next/navigation";
-import { posts } from "../../posts";
+import { posts } from "../posts"
 
-export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">) {
-  const { slug } = await params;
+export default async function Posts({ params }: PageProps<"/blog/[slug]">) {
+  const { slug } = await params;   // params 해제
   const post = posts.find((p) => p.slug === slug);
 
   if (!post) {
-    notFound();
+    return <h1>게시글을 찾을 수 없습니다!</h1>;
   }
 
   return (
-    <div>
+    <article>
       <h1>{post.title}</h1>
       <p>{post.content}</p>
-    </div>
-  );
+    </article>
+  )
 }

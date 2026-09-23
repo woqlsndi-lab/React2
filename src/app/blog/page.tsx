@@ -1,10 +1,11 @@
-import Link from "next/link";
-import { posts } from "../posts";
+import Link from "next/link"
+import { posts } from "./posts"
 
-export default function BlogPage() {
+export default function Page() {
+
   return (
     <div>
-      <h1>Blog</h1>
+      <h1>블로그 목록</h1>
       <ul>
         {posts.map((post) => (
           <li key={post.slug}>
@@ -13,5 +14,5 @@ export default function BlogPage() {
         ))}
       </ul>
     </div>
-  );
+  )
 }

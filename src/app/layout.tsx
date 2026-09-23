@@ -1,4 +1,4 @@
-import "./globals.css";
+import Link from "next/link";
 
 export default function RootLayout({
   children,
@@ -7,7 +7,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body>
+        <header>=== Root Layout Header ===</header>
+        <nav>
+          <Link href="/">Home</Link> | <Link href="/blog">Blog</Link>
+        </nav>
+        <main>{children}</main>
+        <footer>--- Root Layout Footer ---</footer>
+      </body>
     </html>
   );
 }
