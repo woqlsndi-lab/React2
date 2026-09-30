@@ -10,7 +10,11 @@ export default function RootLayout({
       <body>
         <header>=== Root Layout Header ===</header>
         <nav>
-          <Link href="/">Home</Link> | <Link href="/blog">Blog</Link>
+          <Link href="/">Home</Link> |&nbsp;
+          {/* Prefetched when the link is hovered or enters the viewport */}
+          <Link href="/blog">Blog</Link> |&nbsp;
+          {/* No prefetching */}
+          <a href="/contact">Contact</a>
         </nav>
         <main>{children}</main>
         <footer>--- Root Layout Footer ---</footer>

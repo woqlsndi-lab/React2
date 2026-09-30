@@ -5,6 +5,7 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
+- [5주차 (2026-09-30)](#5주차-2026-09-30) — Linking and Navigating, Prefetching, Core Web Vitals
 - [4주차 (2026-09-23)](#4주차-2026-09-23) — 중첩 라우트, 동적 세그먼트, 중첩 레이아웃, searchParams
 - [3주차 (2026-09-16)](#3주차-2026-09-16) — 라우트 그룹, 병렬·가로채기 라우팅, layout
 - [2주차 (2026-09-09)](#2주차-2026-09-09) — 프로젝트 수동 생성, 폴더 구조, 동적 라우팅
@@ -23,7 +24,7 @@ pnpm dev
 
 ```
 src/app/
-├ layout.tsx              // 루트 레이아웃 (Home | Blog 메뉴)
+├ layout.tsx              // 루트 레이아웃 (Home | Blog | Contact 메뉴)
 ├ page.tsx                // /
 ├ (marketing)/
 │ ├ layout.tsx
@@ -33,9 +34,51 @@ src/app/
 │ ├ page.tsx              // /blog         블로그 목록
 │ ├ posts.tsx             // 더미 데이터
 │ └ [slug]/page.tsx       // /blog/nextjs  블로그 상세
+├ blog2/
+│ ├ posts.tsx             // 더미 데이터
+│ └ [slug]/page.tsx       // /blog2/nextjs  generateStaticParams 없이 런타임 처리
+├ contact/
+│ └ page.tsx              // /contact  <a> 태그로 이동 (prefetch 없음)
 └ products/
   └ page.tsx              // /products?id=123&name=foo
 ```
+
+---
+
+## 5주차 (2026-09-30)
+
+### 1. 네비게이션 작동 방식
+- **Server Rendering**: 레이아웃과 페이지는 기본적으로 서버 컴포넌트로 렌더링된다
+- **Prefetching**: `<Link>`로 연결된 경로는 화면에 보이거나 hover되면 미리 불러온다
+  - 정적 경로는 전체, 동적 경로는 `loading.tsx`가 있을 때 일부만 prefetch
+- **Streaming**: `loading.tsx`를 두면 페이지를 `<Suspense>`로 감싸 로딩 UI를 먼저 보여준다
+- **Client-side transitions**: 전체 페이지를 다시 불러오지 않고 공유 레이아웃과 상태를 유지한 채 내용만 바꾼다
+
+### 2. `<Link>` vs `<a>`
+```tsx
+<nav>
+  {/* Prefetched when the link is hovered or enters the viewport */}
+  <Link href="/blog">Blog</Link>
+  {/* No prefetching */}
+  <a href="/contact">Contact</a>
+</nav>
+```
+- 내부 페이지 이동은 `<a>` 대신 `<Link>`를 사용한다 (ESLint `no-html-link-for-pages` 경고)
+- 외부 링크나 `target` 같은 속성이 필요할 때만 `<a>`를 쓴다
+
+### 3. Core Web Vitals
+- 예전 지표: TTFB(첫 바이트), FCP(첫 콘텐츠 표시), TTI(상호작용 가능)
+- 핵심 지표: **LCP**(가장 큰 요소 표시 시간), **FID**(첫 입력 지연), **CLS**(레이아웃 이동 정도)
+- 레이아웃 이동 원인: 크기 없는 이미지, 크기가 정해지지 않은 광고·iframe, 동적 콘텐츠
+
+### 4. devIndicators
+- 개발 모드 화면의 N 아이콘. 위치는 `next.config.ts`의 `devIndicators.position`이나 아이콘의 Preferences에서 바꾼다
+- Next.js 15.2부터 `position` 옵션이 생기고 `appIsrStatus`, `buildActivity` 등은 사용 중단
+
+### 5. generateStaticParams
+- 쓰면 빌드 시점에 동적 경로를 정적 HTML로 미리 생성하고, 안 쓰면 요청할 때마다 서버에서 처리한다
+- 자주 바뀌지 않는 페이지는 사용 권장, 사용자 입력·DB 조회가 필요하면 런타임 처리
+- `blog2/[slug]/page.tsx`는 `generateStaticParams` 없이 `await params`로 slug를 꺼내 처리하는 예제
 
 ---
 
