@@ -5,6 +5,7 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
+- [6주차 (2026-10-07)](#6주차-2026-10-07) — generateStaticParams 실습, 느린 네트워크·프리페칭 비활성화, Bundle Analyzer, History API
 - [5주차 (2026-09-30)](#5주차-2026-09-30) — Linking and Navigating, Prefetching, Core Web Vitals
 - [4주차 (2026-09-23)](#4주차-2026-09-23) — 중첩 라우트, 동적 세그먼트, 중첩 레이아웃, searchParams
 - [3주차 (2026-09-16)](#3주차-2026-09-16) — 라우트 그룹, 병렬·가로채기 라우팅, layout
@@ -24,7 +25,7 @@ pnpm dev
 
 ```
 src/app/
-├ layout.tsx              // 루트 레이아웃 (Home | Blog | Contact 메뉴)
+├ layout.tsx              // 루트 레이아웃 (Home | Blog | Blog2 | Blog3 | Contact 메뉴)
 ├ page.tsx                // /
 ├ (marketing)/
 │ ├ layout.tsx
@@ -37,11 +38,147 @@ src/app/
 ├ blog2/
 │ ├ posts.tsx             // 더미 데이터
 │ └ [slug]/page.tsx       // /blog2/nextjs  generateStaticParams 없이 런타임 처리
+├ blog3/
+│ ├ page.tsx              // /blog3         블로그 목록
+│ ├ posts.tsx             // 더미 데이터
+│ └ [slug]/page.tsx       // /blog3/nextjs  generateStaticParams로 빌드 시 정적 생성
 ├ contact/
 │ └ page.tsx              // /contact  <a> 태그로 이동 (prefetch 없음)
 └ products/
   └ page.tsx              // /products?id=123&name=foo
 ```
+
+---
+
+## 6주차 (2026-10-07)
+
+### 1. generateStaticParams 실습 (`blog3`)
+- 빌드할 때 Next.js가 `app/blog3/[slug]/page.tsx` 같은 동적 라우트를 찾으면 `generateStaticParams()`를 실행한다
+- 반환값은 `[{ slug: "nextjs" }, { slug: "routing" }, ...]` 형태의 배열
+- 각 params마다 `page.tsx`를 실행해서 정적 HTML을 만든다 → `/blog3/nextjs` 등
+
+```tsx
+import { notFound } from "next/navigation";
+import { posts } from "../posts";
+
+export async function generateStaticParams() {
+  return posts.map((post) => ({
+    slug: post.slug,
+  }));
+}
+
+export default async function PostPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const post = posts.find((p) => p.slug === slug);
+
+  if (!post) {
+    notFound();   // 없는 slug → 404 페이지
+  }
+
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </article>
+  );
+}
+```
+
+- `generateStaticParams()`는 slug 배열만 반환하고, 순회하며 HTML을 만드는 건 Next.js 빌드 과정이 한다
+- `map`은 HTML을 만들 목록을 Next.js에 넘겨주는 역할
+- `notFound()`를 호출하면 그 아래 코드는 실행되지 않아서, 이후 `post`는 undefined가 아닌 것으로 처리된다
+
+| 항목 | generateStaticParams 없음 (`blog2`) | 있음 (`blog3`) |
+| --- | --- | --- |
+| 페이지 생성 시점 | 요청할 때 서버에서 생성 (SSR) | 빌드할 때 생성 (SSG) |
+| 첫 로딩 속도 | 서버 렌더링이 필요해서 상대적으로 느림 | 정적 HTML이라 빠름 |
+| SEO | 가능하지만 요청 시 생성 | 매우 유리 |
+| 유연성 | slug 제한 없음 (DB 조회 등) | slug를 미리 알아야 함 |
+
+### 2. await이 없어도 async를 붙이는 이유
+1. **일관성**: 페이지마다 async 여부가 다르면 헷갈린다. 공식 문서 예시도 대부분 async function
+2. **확장성**: 지금은 더미 데이터지만 나중에 `await fetch(...)`, DB 조회가 들어가도 수정할 필요가 없다
+3. **Server Component 호환성**: Server Component는 Promise를 반환할 수 있고, async여도 오버헤드가 거의 없다
+
+### 3. 전환이 느려지는 경우
+- **느린 네트워크**: 클릭 전에 프리페치가 끝나지 않을 수 있다 → `useLinkStatus`로 로딩 표시
+
+```tsx
+'use client'
+import { useLinkStatus } from 'next/link'
+
+export default function LoadingIndicator() {
+  const { pending } = useLinkStatus()
+  return pending ? (
+    <div role="status" aria-label="Loading" className="spinner" />
+  ) : null
+}
+```
+
+- 로딩 표시에 짧은 지연(예: 100ms)과 `opacity: 0` 시작을 주면 **디바운스** 효과 → 정말 오래 걸릴 때만 보인다
+- **Hydration이 완료되지 않음**: `<Link>`는 클라이언트 컴포넌트라 하이드레이션이 끝나야 프리페치한다. 번들이 크면 늦어진다
+  - Hydration: 서버가 만든 정적 HTML에 JavaScript(이벤트, 상태)를 연결해 상호작용 가능하게 만드는 과정
+
+### 4. 프리페칭 비활성화
+```tsx
+<Link prefetch={false} href="/blog">Blog</Link>
+```
+- 무한 스크롤 테이블처럼 링크가 아주 많을 때 리소스 낭비를 막는다
+- 단점: 정적 경로는 클릭할 때 가져오고, 동적 경로는 서버 렌더링을 기다려야 한다
+- 절충안: 마우스를 올렸을 때만 프리페치
+
+```tsx
+'use client'
+import Link from 'next/link'
+import { useState } from 'react'
+
+function HoverPrefetchLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const [active, setActive] = useState(false)
+  return (
+    <Link href={href} prefetch={active ? null : false} onMouseEnter={() => setActive(true)}>
+      {children}
+    </Link>
+  )
+}
+```
+
+### 5. Bundle Analyzer
+```bash
+pnpm add @next/bundle-analyzer
+```
+
+```ts
+// next.config.ts
+import type { NextConfig } from "next";
+import bundleAnalyzer from "@next/bundle-analyzer";
+
+const nextConfig: NextConfig = {};
+
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
+
+export default withBundleAnalyzer(nextConfig);
+```
+- `ANALYZE=true pnpm build`로 실행하면 번들 크기 리포트가 열린다 → 큰 의존성을 찾아 줄인다
+
+### 6. 네이티브 History API
+- `window.history.pushState`, `replaceState`로 새로고침 없이 주소 기록을 바꾼다 (`usePathname`, `useSearchParams`와 동기화됨)
+
+| | pushState | replaceState |
+| --- | --- | --- |
+| 기록 스택 | 새 항목 추가 | 현재 항목 교체 |
+| 뒤로 가기 | 가능 | 불가 |
+| 예시 | 상품 목록 정렬 | 언어(Locale) 전환 |
+
+### 7. Server / Client Components (다음 단원 시작)
+- layout과 page는 기본적으로 **Server Component**
+- **Client Component** (`'use client'`): state·이벤트 핸들러, `useEffect`, `localStorage`·`window` 같은 브라우저 API, 사용자 정의 Hook이 필요할 때
+- **Server Component**: DB·API에서 데이터를 가져올 때, API key·token을 숨길 때, 브라우저로 보내는 JS를 줄이고 FCP를 개선할 때
 
 ---
 
@@ -55,30 +192,89 @@ src/app/
 - **Client-side transitions**: 전체 페이지를 다시 불러오지 않고 공유 레이아웃과 상태를 유지한 채 내용만 바꾼다
 
 ### 2. `<Link>` vs `<a>`
+루트 레이아웃(`layout.tsx`) 메뉴에 Contact를 추가하면서, Blog는 `<Link>`, Contact는 일부러 `<a>`로 연결해 차이를 비교했다.
+
 ```tsx
 <nav>
+  <Link href="/">Home</Link> |&nbsp;
   {/* Prefetched when the link is hovered or enters the viewport */}
-  <Link href="/blog">Blog</Link>
+  <Link href="/blog">Blog</Link> |&nbsp;
   {/* No prefetching */}
   <a href="/contact">Contact</a>
 </nav>
 ```
+
+| | `<Link>` | `<a>` |
+| --- | --- | --- |
+| Prefetch | O (화면에 보이거나 hover 시) | X |
+| 이동 방식 | 클라이언트 전환 (새로고침 없음) | 전체 페이지 새로고침 |
+| 레이아웃·상태 | 유지 | 초기화 |
+
 - 내부 페이지 이동은 `<a>` 대신 `<Link>`를 사용한다 (ESLint `no-html-link-for-pages` 경고)
 - 외부 링크나 `target` 같은 속성이 필요할 때만 `<a>`를 쓴다
+- `contact/page.tsx`는 `<a>`로 이동했을 때 확인용 페이지 (`Contact Page - No prefetching`)
 
 ### 3. Core Web Vitals
 - 예전 지표: TTFB(첫 바이트), FCP(첫 콘텐츠 표시), TTI(상호작용 가능)
 - 핵심 지표: **LCP**(가장 큰 요소 표시 시간), **FID**(첫 입력 지연), **CLS**(레이아웃 이동 정도)
+  - 2024년부터 FID 대신 **INP**(상호작용 후 다음 화면이 그려지기까지의 시간)가 핵심 지표가 되었다
 - 레이아웃 이동 원인: 크기 없는 이미지, 크기가 정해지지 않은 광고·iframe, 동적 콘텐츠
+- Prefetch와 Streaming은 이동한 페이지의 FCP·LCP를 줄여 준다
 
 ### 4. devIndicators
-- 개발 모드 화면의 N 아이콘. 위치는 `next.config.ts`의 `devIndicators.position`이나 아이콘의 Preferences에서 바꾼다
+- 개발 모드 화면의 N 아이콘. 현재 경로가 정적(○)인지 동적(ƒ)인지 등을 알려준다
+- 위치는 `next.config.ts`의 `devIndicators.position`이나 아이콘의 Preferences에서 바꾼다 (기본값 `bottom-left`)
 - Next.js 15.2부터 `position` 옵션이 생기고 `appIsrStatus`, `buildActivity` 등은 사용 중단
+
+```ts
+const nextConfig: NextConfig = {
+  devIndicators: {
+    position: "bottom-right", // 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'
+  },
+  // devIndicators: false,   // 아이콘 숨기기 (오류 표시는 그대로 나온다)
+};
+```
 
 ### 5. generateStaticParams
 - 쓰면 빌드 시점에 동적 경로를 정적 HTML로 미리 생성하고, 안 쓰면 요청할 때마다 서버에서 처리한다
 - 자주 바뀌지 않는 페이지는 사용 권장, 사용자 입력·DB 조회가 필요하면 런타임 처리
-- `blog2/[slug]/page.tsx`는 `generateStaticParams` 없이 `await params`로 slug를 꺼내 처리하는 예제
+
+```tsx
+// 사용하면 → 빌드할 때 slug 목록만큼 페이지를 미리 생성
+export async function generateStaticParams() {
+  return posts.map((post) => ({ slug: post.slug }));
+}
+```
+
+`blog2/[slug]/page.tsx` — `generateStaticParams` 없이 요청이 올 때 처리하는 예제
+
+```tsx
+import { posts } from "../posts";
+
+export default async function PostPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const post = posts.find((p) => p.slug === slug);
+
+  if (!post) {
+    return <h1>포스트를 찾을 수 없습니다.</h1>;
+  }
+
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </article>
+  );
+}
+```
+
+- 더미 데이터(`blog2/posts.tsx`): `nextjs`, `routing`, `ssr-ssg`, `dynamic-routes` 4개
+- `/blog2/nextjs` → 해당 글 표시, 없는 slug → "포스트를 찾을 수 없습니다."
+- 4주차 `blog`는 `PageProps<"/blog/[slug]">` 타입을 썼고, 여기서는 `params` 타입을 직접 `Promise<{ slug: string }>`로 적었다
 
 ---
 
