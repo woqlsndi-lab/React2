@@ -5,6 +5,8 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
+- [8주차 (2026-10-28)](#8주차-2026-10-28) — Counter 컴포넌트, Server → Client props 전달, LikeButton 낙관적 업데이트, JS 번들 크기 줄이기
+- [7주차 (2026-10-14)](#7주차-2026-10-14) — Server / Client Components, RSC Payload, Hydration, Falsy, 낙관적·비관적 업데이트
 - [6주차 (2026-10-07)](#6주차-2026-10-07) — generateStaticParams 실습, 느린 네트워크·프리페칭 비활성화, Bundle Analyzer, History API
 - [5주차 (2026-09-30)](#5주차-2026-09-30) — Linking and Navigating, Prefetching, Core Web Vitals
 - [4주차 (2026-09-23)](#4주차-2026-09-23) — 중첩 라우트, 동적 세그먼트, 중첩 레이아웃, searchParams
@@ -24,9 +26,20 @@ pnpm dev
 ## 실습 파일
 
 ```
+src/
+├ components/
+│ └ Counter.tsx           // 'use client' 카운터 컴포넌트
+├ lib/
+│ └ data.tsx              // posts 더미 데이터 (id, likes, title, content)
+├ ui/
+│ └ LikeButton.tsx        // 'use client' 좋아요 버튼 (낙관적 업데이트)
+└ app/
+
 src/app/
-├ layout.tsx              // 루트 레이아웃 (Home | Blog | Blog2 | Blog3 | Contact 메뉴)
+├ layout.tsx              // 루트 레이아웃 (Home | Blog | Blog2 | Blog3 | Contact | Counter + Slug Page Menu)
 ├ page.tsx                // /
+├ [id]/page.tsx           // /nextjs  post 제목 + LikeButton
+├ counter/page.tsx        // /counter  Counter 컴포넌트 호출
 ├ (marketing)/
 │ ├ layout.tsx
 │ └ about/page.tsx        // /about
@@ -47,6 +60,293 @@ src/app/
 └ products/
   └ page.tsx              // /products?id=123&name=foo
 ```
+
+---
+
+## 8주차 (2026-10-28)
+
+### 1. src 디렉토리 관리
+- 공식 문서는 `/app/ui/counter.tsx`에 작성했지만, `src` 디렉토리를 쓰는 경우 다음과 같이 관리하는 것이 일반적이다
+  - `src/app/` 아래에는 **라우팅 페이지**만 작성한다
+  - 그 외 사용자 정의 component나 library는 `src/` 아래(`src/components`, `src/lib`, `src/ui`)에 작성한다
+- `@/*` → `./src/*` 경로 별칭 덕분에 `@/components/Counter`처럼 import한다
+
+### 2. [실습1] Counter 컴포넌트 (`src/components/Counter.tsx`)
+- state와 이벤트 핸들러를 쓰므로 맨 위에 `'use client'`를 붙인다
+
+```tsx
+'use client'
+
+import { useState } from 'react'
+
+export default function Counter() {
+  const [count, setCount] = useState(0)
+
+  return (
+    <div>
+      <p>{count} likes</p>
+      <button onClick={() => setCount(count + 1)}>Click me</button>
+    </div>
+  )
+}
+```
+
+### 3. [실습2] 라우팅 페이지에서 호출 (`src/app/counter/page.tsx`)
+- 컴포넌트는 사용할 목적이 있어서 만든다 → 다른 컴포넌트를 완성하거나, 라우팅 페이지를 렌더링하기 위해 쓴다
+- `page.tsx`는 Server Component지만 Client Component인 `<Counter />`를 그대로 렌더링할 수 있다
+
+```tsx
+import Counter from '@/components/Counter'
+
+export default function CounterPage() {
+  return (
+    <div>
+      <h1>Counter Page</h1>
+      <Counter />
+    </div>
+  )
+}
+```
+
+### 4. Server → Client로 데이터 전달 (like button)
+- Server Component(`[id]/page.tsx`)가 데이터를 찾고, `likes`를 **props**로 Client Component(`<LikeButton>`)에 넘긴다
+- 클라이언트 상호작용(클릭)은 `LikeButton`만 담당한다
+- 공식 문서는 `getPost(id)`를 쓰지만, 실습에서는 직접 만든 더미 데이터(`src/lib/data.tsx`)에서 찾는다
+
+```tsx
+// src/lib/data.tsx
+// dummy data
+
+export const posts = [
+  { id: "nextjs", likes: 5, title: "Next.js 소개", content: "Next.js는 React 기반의 풀스택 프레임워크입니다." },
+  { id: "routing", likes: 3, title: "App Router 알아보기", content: "Next.js 13부터는 App Router가 도입되었습니다." },
+  { id: "ssr-ssg", likes: 0, title: "SSR vs SSG", content: "서버사이드 렌더링과 정적 사이트 생성의 차이를 알아봅니다." },
+  { id: "dynamic routes", likes: 0, title: "동적 라우팅", content: "Next.js에서 [slug]를 활용한 라우팅 방식입니다." },
+];
+```
+
+```tsx
+// src/app/[id]/page.tsx
+import LikeButton from '@/ui/LikeButton'
+import { posts } from '@/lib/data'
+import { notFound } from 'next/navigation'
+
+export default async function PostPage({
+  params
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params;
+
+  // getPost 대신 직접 posts 배열에서 찾는다
+  const post = posts.find((p) => p.id === id);
+
+  if (!post) {
+    notFound();   // 없는 id → 404 페이지
+  }
+
+  return (
+    <>
+      <main>
+        <h1>{post.title}</h1>
+        <LikeButton likes={post.likes} />
+      </main>
+    </>
+  )
+}
+```
+- 감싸는 `<div>` 대신 Fragment(`<>...</>`)를 써서 불필요한 DOM을 줄인다
+
+### 5. LikeButton — 낙관적 업데이트 (`src/ui/LikeButton.tsx`)
+- 서버 응답을 기다리지 않고 `setCount`로 UI를 먼저 바꾼다 (7주차 낙관적 업데이트)
+- `likes ?? 0` → props가 `null`/`undefined`이면 0으로 시작 (NULL 병합 연산자)
+- `isLiking` 동안 버튼을 `disabled`로 막아 중복 클릭을 방지한다. 실습에서는 3초(`3000`)로 늘려 눈으로 확인했다
+
+```tsx
+'use client'
+
+import { useState } from 'react'
+
+export default function LikeButton({ likes }: { likes: number }) {
+  // Optimistic Updates(낙관적 업데이트)
+  const [count, setCount] = useState<number>(likes ?? 0)
+  const [isLiking, setIsLiking] = useState(false)
+
+  const handleClick = async () => {
+    // 낙관적 업데이트
+    setIsLiking(true)
+    setCount((c) => c + 1)
+
+    // 실제 저장 로직(API 호출 등)이 있다면 이곳에서 호출한다
+    // 예: await fetch('/api/like', { method: 'POST', body: JSON.stringify({ id }) })
+
+    // 예제에서는 짧은 시연 후 버튼 상태만 해제한다
+    setTimeout(() => setIsLiking(false), 3000)
+  }
+
+  return (
+    <button onClick={handleClick} disabled={isLiking} aria-pressed={false}>
+      👍 {count}
+    </button>
+  )
+}
+```
+
+| 파일 | 종류 | 역할 |
+| --- | --- | --- |
+| `app/[id]/page.tsx` | Server Component | id로 post 찾기, `notFound()`, likes를 props로 전달 |
+| `lib/data.tsx` | 데이터 | 더미 posts 배열 |
+| `ui/LikeButton.tsx` | Client Component | 클릭 시 좋아요 수 즉시 증가 |
+
+### 6. [실습3] 모든 페이지에서 링크 확인 (`src/app/layout.tsx`)
+- 모든 라우팅 페이지에서 보이게 하려면 **루트 레이아웃**에 링크를 넣는다
+
+```tsx
+<nav>
+  ...
+  <a href="/contact">Contact</a> |&nbsp;
+  <Link href="/counter">Counter</Link>
+  <br />
+  <br />
+  Slug Page Menu :&nbsp;
+  <Link href="/nextjs">nextjs</Link>&nbsp;|&nbsp;
+  <Link href="/routing">routing</Link>&nbsp;|&nbsp;
+  <Link href="/ssr-ssg">ssr-sge</Link>&nbsp;|&nbsp;
+  <Link href="/dynamic routes">dynamic routes</Link>
+  <br />
+</nav>
+```
+- 작년 코드를 그대로 붙여 넣으면 `Link` 중복 import(`the name 'Link' is defined multiple times`), 없는 `ThemeProvider`·`ThemeStatus` 모듈(`Module not found`) 오류가 난다 → 중복 import와 없는 컴포넌트를 지워서 해결
+
+### 7. JS 번들 크기 줄이기
+- 클라이언트 JS 번들을 줄이려면 UI의 큰 부분을 Client Component로 만들지 말고, **대화형 컴포넌트에만** `'use client'`를 붙인다
+- `'use client'` 파일이 import하고 렌더링하는 컴포넌트는 모두 클라이언트 번들에 포함된다. 단, children·props로 전달된 Server Component는 서버에서 렌더링된다
+- 예: `<Layout>`은 로고·탐색 링크 같은 정적 요소가 대부분이고 검색창만 대화형이다
+  - `<Search />`는 사용자와 바로 상호작용하므로 Client Component
+  - `<Logo />`는 상대적으로 덜 중요하고 이미지 등 용량이 크므로 Server Component
+  - **나머지 layout은 Server Component로 유지한다**
+
+```tsx
+// app/layout.tsx
+// Client Component
+import Search from './search'
+// Server Component
+import Logo from './logo'
+
+// Layout is a Server Component by default
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <nav>
+        <Logo />
+        <Search />
+      </nav>
+      <main>{children}</main>
+    </>
+  )
+}
+```
+
+```tsx
+// app/ui/search.tsx
+'use client'
+
+export default function Search() {
+  // ...
+}
+```
+
+---
+
+## 7주차 (2026-10-14)
+
+### 1. Client Component 사용
+- 파일 맨 위, import 문 위에 `"use client"` 지시문을 추가하면 Client Component가 된다
+- `"use client"`는 Server와 Client 모듈 트리 사이의 **경계**를 선언한다 → 그 파일에서 import하는 모듈도 클라이언트 번들에 포함된다
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+export default function LikeButton({ like }: { like?: number }) {
+  const [count, setCount] = useState<number>(like ?? 0);
+  return <button onClick={() => setCount(count + 1)}>♥ {count}</button>;
+}
+```
+
+### 2. Server / Client Component는 어떻게 동작하나
+**Server Component의 작동**
+- Next.js는 서버에서 React의 API를 사용해 렌더링을 조율한다
+- 렌더링 작업은 개별 라우트 세그먼트별 묶음으로 나뉜다
+- Server Component는 **RSC Payload**(React Server Component Payload)라는 특수한 데이터 형식으로 렌더링된다
+- Client Component와 RSC Payload를 사용해 HTML을 미리 렌더링한다
+
+**Client Component의 작동 (첫 로드)**
+- **HTML**: 경로의 비대화형 미리보기를 즉시 보여준다
+- **RSC Payload**: Client와 Server Component 트리를 조정(reconcile)한다
+- **JS**: Client Component를 하이드레이션해서 애플리케이션을 대화형으로 만든다
+
+**Hydration**
+- 이벤트 핸들러를 DOM에 연결해 정적 HTML을 인터랙티브하게 만드는 React의 프로세스
+
+| | JSON | Binary (RSC) |
+| --- | --- | --- |
+| 크기 | 크다 | 작다 |
+| 파싱 속도 | 느리다 | 빠르다 |
+| 구조 표현력 | 문자열, 숫자, 불리언, 객체, 배열, null | 이미지·오디오·비디오, 구조화된 컴파일 데이터 등 제한 없음 |
+
+### 3. Server / Client Component를 사용하는 시기
+- **Client Component**
+  - state와 이벤트 핸들러 (`onClick`, `onChange`)
+  - 생명주기 로직 (`useEffect`)
+  - 브라우저 전용 API (`localStorage`, `window`, `Navigator.geolocation` 등)
+  - 사용자 정의 Hook
+- **Server Component**
+  - 서버의 DB나 API에서 데이터를 가져올 때
+  - API key, token 같은 보안 데이터를 클라이언트에 노출하지 않고 쓸 때
+  - 브라우저로 전송되는 JS 양을 줄이고 싶을 때
+  - FCP(First Contentful Paint)를 개선하고 콘텐츠를 클라이언트에 점진적으로 스트리밍할 때
+
+### 4. Falsy
+- Boolean이 필요한 맥락(조건문, 논리 연산 등)에서 `false`로 평가되는 값
+- `false` 하나만이 아니라 false에 해당하는 여러 값을 포괄하는 개념
+
+| 값 | 설명 |
+| --- | --- |
+| `false` | 불리언 false 값 자체 |
+| `0` | 숫자 0 |
+| `""` | 빈 문자열 |
+| `null` | 값이 없음을 의도적으로 명시 (개발자가 할당) |
+| `undefined` | 값이 할당되지 않음 (시스템이 자동 부여) |
+| `NaN` | Not-a-Number, 숫자가 아님 |
+
+### 5. NULL 병합 연산자 `??`
+- 왼쪽 피연산자가 `null` 또는 `undefined`이면 오른쪽 값을, 아니면 왼쪽 값을 반환한다
+- `||`와 달리 `0`, `""`는 그대로 유지된다 → `like`가 `0`이어도 `0`으로 시작
+
+```tsx
+const [count, setCount] = useState<number>(like ?? 0);
+```
+
+### 6. 비관적 업데이트 (Pessimistic Update)
+- 이벤트가 발생하면 먼저 서버에 요청을 보내고, 성공 응답을 받은 후에 UI를 업데이트한다 (일반적인 방식)
+- 장점: 서버 응답을 기반으로 하므로 데이터 일관성이 보장되고, 잘못된 정보가 표시될 염려가 없다
+- 단점: 서버 응답을 기다려야 해서 응답이 늦거나 네트워크가 지연되면 체감 속도가 느려진다
+
+### 7. 낙관적 업데이트 (Optimistic Update)
+- 이벤트(예: 좋아요 버튼 클릭)가 발생하면 서버 응답을 기다리지 않고 UI를 즉시 변경한 후 서버에 요청을 보낸다
+- 요청이 성공한다고 **낙관**해서 먼저 화면에 변화를 보여주고, 실패하면 원래 상태로 **롤백**한다
+- 목적: 네트워크 지연 동안에도 앱이 빠르게 반응하는 것처럼 느끼게 한다
+- 장점: 서버 응답 속도와 관계없이 즉각적인 피드백 → 네트워크가 느려도 체감 속도가 빠르다
+- 단점: 오류가 나면 잠시 잘못된 정보가 보일 수 있고, 복구(롤백) 로직이 필요하다
+
+| | 비관적 업데이트 | 낙관적 업데이트 |
+| --- | --- | --- |
+| UI 변경 시점 | 서버 응답 후 | 요청 즉시 |
+| 데이터 일관성 | 보장 | 잠시 어긋날 수 있음 |
+| 체감 속도 | 느림 | 빠름 |
+| 오류 처리 | 단순 | 롤백 로직 필요 |
 
 ---
 
