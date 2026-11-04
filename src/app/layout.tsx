@@ -1,4 +1,7 @@
 import Link from "next/link";
+import "./globals.css";
+import ThemeProvider from "@/components/ThemeProvider";
+import ThemeStatus from "@/components/ThemeStatus";
 
 export default function RootLayout({
   children,
@@ -8,7 +11,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <header>=== Root Layout Header ===</header>
+        <ThemeProvider>
+        <header>
+          <p>=== Root Layout Header ===</p>
+          <ThemeStatus />
+        </header>
         <nav>
           <Link href="/">Home</Link> |&nbsp;
           {/* Prefetched when the link is hovered or enters the viewport */}
@@ -18,6 +25,8 @@ export default function RootLayout({
           {/* No prefetching */}
           <a href="/contact">Contact</a> |&nbsp;
           <Link href="/counter">Counter</Link>
+          <br />
+          <Link href="/interleaved">Interleaved</Link> |
           <br />
           <br />
           Slug Page Menu :&nbsp;
@@ -31,6 +40,7 @@ export default function RootLayout({
         <br />
         <main>{children}</main>
         <footer>--- Root Layout Footer ---</footer>
+        </ThemeProvider>
       </body>
     </html>
   );

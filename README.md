@@ -5,7 +5,8 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
-- [8주차 (2026-10-28)](#8주차-2026-10-28) — Counter 컴포넌트, Server → Client props 전달, LikeButton 낙관적 업데이트, JS 번들 크기 줄이기
+- [9주차 (2026-11-04)](#9주차-2026-11-04) — Server → Client 데이터 전달·직렬화, Interleaving(ClientLayout + ServerContent), Context / Context provider(테마 토글)
+- [8주차 (2026-10-28)](#8주차-2026-10-28) — src 디렉토리 관리, Server → Client props 전달, LikeButton 낙관적 업데이트, JS 번들 크기 줄이기
 - [7주차 (2026-10-14)](#7주차-2026-10-14) — Server / Client Components, RSC Payload, Hydration, Falsy, 낙관적·비관적 업데이트
 - [6주차 (2026-10-07)](#6주차-2026-10-07) — generateStaticParams 실습, 느린 네트워크·프리페칭 비활성화, Bundle Analyzer, History API
 - [5주차 (2026-09-30)](#5주차-2026-09-30) — Linking and Navigating, Prefetching, Core Web Vitals
@@ -28,7 +29,11 @@ pnpm dev
 ```
 src/
 ├ components/
-│ └ Counter.tsx           // 'use client' 카운터 컴포넌트
+│ ├ Counter.tsx           // 'use client' 카운터 컴포넌트
+│ ├ ClientLayout.tsx      // 'use client' children 슬롯을 가진 레이아웃 (interleaving)
+│ ├ ServerContent.tsx     // Server Component, jsonplaceholder에서 데이터 fetch
+│ ├ ThemeProvider.tsx     // 'use client' ThemeContext + theme 상태/toggle 제공
+│ └ ThemeStatus.tsx       // 'use client' useContext로 테마 토글 버튼
 ├ lib/
 │ └ data.tsx              // posts 더미 데이터 (id, likes, title, content)
 ├ ui/
@@ -36,10 +41,12 @@ src/
 └ app/
 
 src/app/
-├ layout.tsx              // 루트 레이아웃 (Home | Blog | Blog2 | Blog3 | Contact | Counter + Slug Page Menu)
+├ layout.tsx              // 루트 레이아웃 (ThemeProvider로 감쌈, ThemeStatus 버튼, 메뉴 + Interleaved 링크)
+├ globals.css             // html[data-theme='light'|'dark'] 테마 스타일
 ├ page.tsx                // /
 ├ [id]/page.tsx           // /nextjs  post 제목 + LikeButton
 ├ counter/page.tsx        // /counter  Counter 컴포넌트 호출
+├ interleaved/page.tsx    // /interleaved  <ClientLayout><ServerContent /></ClientLayout>
 ├ (marketing)/
 │ ├ layout.tsx
 │ └ about/page.tsx        // /about
@@ -63,6 +70,71 @@ src/app/
 
 ---
 
+## 9주차 (2026-11-04)
+
+### 1. Server → Client로 데이터 전달 (props)
+- props를 사용해 Server Component에서 Client Component로 데이터를 전달한다 (8주차 `<LikeButton likes={post.likes} />`)
+- 다른 방법으로 **`use` Hook**을 쓰면 Server → Client로 데이터를 스트리밍할 수도 있다 (Fetching Data 단원에서 다룸)
+- Client Component에 넘기는 props는 React로 **직렬화(serialization)** 가능해야 한다
+  - 직렬화: 메모리의 복잡한 데이터(객체·배열 등)를 바이트의 연속 형태로 바꾸는 과정 → 파일 저장·네트워크 전송이 쉬워진다
+  - React/Next.js는 컴포넌트 트리를 서버에서 직렬화해 클라이언트로 보내고, 클라이언트에서 역직렬화한다
+
+### 2. Server / Client Component 인터리빙 (Interleaving)
+- 인터리빙은 원래 데이터를 섞어서 전송해 버스트 오류의 영향을 줄이는 통신 기술이고, 문서에서는 Server·Client Component가 **섞여서 동작하는 패턴**을 말한다
+- Server 안에 Client를 넣을 수는 있지만, **Client 안에서 Server Component를 직접 import하는 것은 불가능**하다
+- 그래서 Client Component가 **껍데기 역할**을 하고, `children` 슬롯에 Server Component를 **끼워 넣는다** (문서 예: `<Modal>` 안에 `<Cart>`)
+
+```tsx
+// src/app/interleaved/page.tsx (Server Component)
+export default function Page() {
+  return (
+    <ClientLayout>       {/* 'use client', {children} 자리가 slot */}
+      <ServerContent />  {/* async, 서버에서 fetch */}
+    </ClientLayout>
+  );
+}
+```
+
+- 동작 과정
+  1. `ServerContent`를 서버에서 렌더링 → HTML로 변환
+  2. 이 HTML을 `ClientLayout`의 `{children}` 자리에 끼워 넣음
+  3. 클라이언트에서는 `ClientLayout`만 hydration(JS 연결)
+  4. 서버 데이터는 이미 들어와 있고, 버튼·이벤트는 Client Component가 처리한다
+- `ServerContent`는 [JSONPlaceholder](https://jsonplaceholder.typicode.com)(테스트용 가짜 REST API)의 `/posts/`를 가져와 `data[0].title`을 출력한다
+  - 리소스: `/posts`, `/comments`, `/albums`, `/photos`, `/todos`, `/users` / `GET`·`POST`·`PUT`·`PATCH`·`DELETE` 모두 지원
+
+### 3. Context란?
+- React의 **Context API**로 컴포넌트 사이에 데이터를 공유하는 방법이다
+  - **전역 상태 관리**: 사용자 정보, 테마 설정처럼 앱 전체에서 쓰는 데이터를 한곳에서 관리한다
+  - **props drilling 해결**: 트리가 깊어져도 props를 계속 넘기지 않고 필요한 컴포넌트에서 바로 꺼내 쓴다
+  - React 기능이라 React 공식 문서에 더 자세한 설명이 있다
+- `createContext()`로 Context를 만들고, `<MyContext.Provider value=...>`로 값을 제공하고, `useContext(MyContext)`로 꺼내 쓴다
+
+### 4. Context provider
+- **Server Component에서는 React Context를 쓸 수 없다**
+- 그래서 `children`을 받는 Client Component(Provider)를 만들고, Server Component인 `layout`에서 감싼다
+- 문서 예제(`value="dark"` 고정)는 변화가 눈에 안 보여서, theme 상태와 toggle 버튼을 추가해 실습했다
+  - `ThemeProvider`: theme state·`toggleTheme`을 제공하고 `document`에 `data-theme`을 설정한다
+  - `ThemeStatus`: `useContext(ThemeContext)`로 꺼내 토글 버튼을 보여준다
+  - `layout.tsx`: `<body>` 안 전체를 `<ThemeProvider>`로 감싸고 header에 `<ThemeStatus />`를 넣는다
+  - `globals.css`: `html[data-theme='light'|'dark']`에 따라 배경색·글자색을 바꾼다
+
+```tsx
+export const ThemeContext = createContext<{
+  theme: 'light' | 'dark'
+  toggleTheme: () => void
+}>({
+  theme: 'light',
+  toggleTheme: () => { },
+})
+```
+
+- `<{...}>`는 타입 부분이다 → theme은 `'light' | 'dark'`, toggleTheme은 인자·반환값이 없는 함수
+- 초기값은 **Provider가 없을 때 쓰는 fallback 값**이다. `createContext()`에는 기본값이 반드시 있어야 해서 보통 빈 함수(`() => {}`)를 넣고, 실제 동작은 `ThemeProvider`에서 설정한다
+- 슬라이드는 `'./theme-provider'`로 import하지만 파일명이 `ThemeProvider.tsx`라 `'./ThemeProvider'`로 맞춰야 에러가 나지 않는다
+
+---
+
 ## 8주차 (2026-10-28)
 
 ### 1. src 디렉토리 관리
@@ -70,45 +142,9 @@ src/app/
   - `src/app/` 아래에는 **라우팅 페이지**만 작성한다
   - 그 외 사용자 정의 component나 library는 `src/` 아래(`src/components`, `src/lib`, `src/ui`)에 작성한다
 - `@/*` → `./src/*` 경로 별칭 덕분에 `@/components/Counter`처럼 import한다
+- `page.tsx`는 Server Component지만 `<Counter />` 같은 Client Component를 그대로 렌더링할 수 있다 (`/counter`)
 
-### 2. [실습1] Counter 컴포넌트 (`src/components/Counter.tsx`)
-- state와 이벤트 핸들러를 쓰므로 맨 위에 `'use client'`를 붙인다
-
-```tsx
-'use client'
-
-import { useState } from 'react'
-
-export default function Counter() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <div>
-      <p>{count} likes</p>
-      <button onClick={() => setCount(count + 1)}>Click me</button>
-    </div>
-  )
-}
-```
-
-### 3. [실습2] 라우팅 페이지에서 호출 (`src/app/counter/page.tsx`)
-- 컴포넌트는 사용할 목적이 있어서 만든다 → 다른 컴포넌트를 완성하거나, 라우팅 페이지를 렌더링하기 위해 쓴다
-- `page.tsx`는 Server Component지만 Client Component인 `<Counter />`를 그대로 렌더링할 수 있다
-
-```tsx
-import Counter from '@/components/Counter'
-
-export default function CounterPage() {
-  return (
-    <div>
-      <h1>Counter Page</h1>
-      <Counter />
-    </div>
-  )
-}
-```
-
-### 4. Server → Client로 데이터 전달 (like button)
+### 2. Server → Client로 데이터 전달 (like button)
 - Server Component(`[id]/page.tsx`)가 데이터를 찾고, `likes`를 **props**로 Client Component(`<LikeButton>`)에 넘긴다
 - 클라이언트 상호작용(클릭)은 `LikeButton`만 담당한다
 - 공식 문서는 `getPost(id)`를 쓰지만, 실습에서는 직접 만든 더미 데이터(`src/lib/data.tsx`)에서 찾는다
@@ -157,7 +193,7 @@ export default async function PostPage({
 ```
 - 감싸는 `<div>` 대신 Fragment(`<>...</>`)를 써서 불필요한 DOM을 줄인다
 
-### 5. LikeButton — 낙관적 업데이트 (`src/ui/LikeButton.tsx`)
+### 3. LikeButton — 낙관적 업데이트 (`src/ui/LikeButton.tsx`)
 - 서버 응답을 기다리지 않고 `setCount`로 UI를 먼저 바꾼다 (7주차 낙관적 업데이트)
 - `likes ?? 0` → props가 `null`/`undefined`이면 0으로 시작 (NULL 병합 연산자)
 - `isLiking` 동안 버튼을 `disabled`로 막아 중복 클릭을 방지한다. 실습에서는 3초(`3000`)로 늘려 눈으로 확인했다
@@ -198,27 +234,7 @@ export default function LikeButton({ likes }: { likes: number }) {
 | `lib/data.tsx` | 데이터 | 더미 posts 배열 |
 | `ui/LikeButton.tsx` | Client Component | 클릭 시 좋아요 수 즉시 증가 |
 
-### 6. [실습3] 모든 페이지에서 링크 확인 (`src/app/layout.tsx`)
-- 모든 라우팅 페이지에서 보이게 하려면 **루트 레이아웃**에 링크를 넣는다
-
-```tsx
-<nav>
-  ...
-  <a href="/contact">Contact</a> |&nbsp;
-  <Link href="/counter">Counter</Link>
-  <br />
-  <br />
-  Slug Page Menu :&nbsp;
-  <Link href="/nextjs">nextjs</Link>&nbsp;|&nbsp;
-  <Link href="/routing">routing</Link>&nbsp;|&nbsp;
-  <Link href="/ssr-ssg">ssr-sge</Link>&nbsp;|&nbsp;
-  <Link href="/dynamic routes">dynamic routes</Link>
-  <br />
-</nav>
-```
-- 작년 코드를 그대로 붙여 넣으면 `Link` 중복 import(`the name 'Link' is defined multiple times`), 없는 `ThemeProvider`·`ThemeStatus` 모듈(`Module not found`) 오류가 난다 → 중복 import와 없는 컴포넌트를 지워서 해결
-
-### 7. JS 번들 크기 줄이기
+### 4. JS 번들 크기 줄이기
 - 클라이언트 JS 번들을 줄이려면 UI의 큰 부분을 Client Component로 만들지 말고, **대화형 컴포넌트에만** `'use client'`를 붙인다
 - `'use client'` 파일이 import하고 렌더링하는 컴포넌트는 모두 클라이언트 번들에 포함된다. 단, children·props로 전달된 Server Component는 서버에서 렌더링된다
 - 예: `<Layout>`은 로고·탐색 링크 같은 정적 요소가 대부분이고 검색창만 대화형이다
