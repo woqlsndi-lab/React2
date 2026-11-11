@@ -5,6 +5,7 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
+- [10주차 (2026-11-11)](#10주차-2026-11-11) — Context provider 코드 상세(useEffect·의존성 배열·data-theme), CSS 속성 선택자, 동작 흐름, 외부(서드 파티) component
 - [9주차 (2026-11-04)](#9주차-2026-11-04) — Server → Client 데이터 전달·직렬화, Interleaving(ClientLayout + ServerContent), Context / Context provider(테마 토글)
 - [8주차 (2026-10-28)](#8주차-2026-10-28) — src 디렉토리 관리, Server → Client props 전달, LikeButton 낙관적 업데이트, JS 번들 크기 줄이기
 - [7주차 (2026-10-14)](#7주차-2026-10-14) — Server / Client Components, RSC Payload, Hydration, Falsy, 낙관적·비관적 업데이트
@@ -67,6 +68,56 @@ src/app/
 └ products/
   └ page.tsx              // /products?id=123&name=foo
 ```
+
+---
+
+## 10주차 (2026-11-11)
+
+### 1. Context provider 코드 상세 (`ThemeProvider.tsx`)
+- `useState<'light' | 'dark'>('light')` → `'light' | 'dark'`는 TypeScript **유니온 타입**이다. 둘 중 하나만 넣을 수 있어 자동완성과 타입 안정성이 좋아진다
+- `useEffect`는 렌더링 후 **부수 효과(side effect)**를 실행하는 Hook이다
+  - `typeof window !== 'undefined'` → SSR 단계에는 window가 없어 `ReferenceError`가 나므로 **브라우저일 때만 실행**하라는 뜻
+  - `document.documentElement.dataset.theme = theme` → `<html data-theme="dark">`처럼 html 태그에 속성을 붙인다
+  - 두 번째 인자 `[theme]`은 **의존성 배열**이다. theme이 바뀔 때마다 다시 실행된다
+- `toggleTheme`은 삼항 연산자로 `'dark' ↔ 'light'`를 바꾼다
+- `ThemeContext.Provider`는 `createContext()`를 호출하면 자동으로 생기는 컴포넌트다 (`Consumer`도 같이 생김). `value={{ theme, toggleTheme }}`로 하위 컴포넌트에 같이 내려준다
+- `ThemeStatus`의 `aria-label`은 화면 낭독기 같은 보조 기술에 버튼 역할을 알려주는 접근성 속성이다 (aria = Accessible Rich Internet Applications)
+
+### 2. CSS 속성 선택자와 Provider 위치
+- `html[data-theme='dark']`는 **속성 선택자(Attribute Selector)**다. class를 여러 개 붙이는 것보다 스타일 충돌을 줄일 수 있다
+- 문서에서는 Provider를 트리에서 **최대한 깊게**(`{children}`만) 감싸야 Next.js가 정적 부분을 최적화하기 쉽다고 한다
+- 하지만 이번 실습은 CSS 속성 선택자로 `html`을 쓰기 때문에 `{children}`만 감싸면 동작하지 않아서 body 안 전체를 감쌌다
+- 개발자 도구(Elements)에서 `<html data-theme="dark">`로 바뀌는 것을 확인했다
+
+### 3. 동작 흐름 정리
+
+```
+RootLayout 렌더
+ → ThemeProvider 생성 (useState: theme)
+ → Provider value 제공 → children 렌더
+ → ThemeStatus가 useContext로 읽음
+ → 버튼 클릭 → toggleTheme() 호출
+ → setTheme 실행 (state 변경)
+ → useEffect 실행 → document.dataset.theme 업데이트
+ → Provider & Consumer 리렌더 → UI 갱신 (CSS [data-theme] 적용)
+```
+
+### 4. 외부(서드 파티) component
+- client 전용 기능(`useState` 등)을 쓰는데 `"use client"`가 없는 외부 컴포넌트는 **Server Component에서 바로 쓰면 오류**가 난다 (예: `acme-carousel`의 `<Carousel />`)
+- Client Component 안에서 쓰거나, 아래처럼 **자체 Client Component로 감싸서** 다시 export 하면 Server Component에서도 쓸 수 있다
+
+```tsx
+// app/carousel.tsx
+'use client'
+import { Carousel } from 'acme-carousel'
+export default Carousel
+```
+
+- 실습에서 나온 오류
+  - `Cannot find module 'acme-carousel'` → 먼저 패키지를 설치한다
+  - `Property 'items' is missing` → `CarouselProps`의 필수 prop `items`를 안 넘겨서 생긴 타입 에러. picsum.photos 더미 이미지로 `items` 배열을 만들어 넘긴다
+  - 이미지가 한 번에 다 나오는 건 패키지 스타일이 적용 안 된 것이다. 보통 `globals.css`에서 `@import`하지만 이 패키지는 오류가 나서, `styles.css`를 components로 복사하고 `import './styles.css'` 했다
+- npm에서 embla-carousel 같은 다른 carousel 패키지도 다운로드 수·dependents를 보고 고를 수 있다
 
 ---
 

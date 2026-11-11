@@ -5,9 +5,9 @@ import ThemeStatus from "@/components/ThemeStatus";
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="en">
       <body>
@@ -33,7 +33,7 @@ export default function RootLayout({
           <Link href="/nextjs">nextjs</Link>&nbsp;|&nbsp;
           <Link href="/routing">routing</Link>&nbsp;|&nbsp;
           <Link href="/ssr-ssg">ssr-sge</Link>&nbsp;|&nbsp;
-          <Link href="/dynamic routes">dynamic routes</Link>
+          <Link href="/dynamic-routes">dynamic-routes</Link>
           <br />
         </nav>
         <br />
