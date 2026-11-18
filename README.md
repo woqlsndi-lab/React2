@@ -5,6 +5,7 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
+- [11주차 (2026-11-18)](#11주차-2026-11-18) — 외부 component(acme-carousel) 실습, 환경 변수 노출 예방(server-only), Fetching Data(use Hook + Suspense 스트리밍)
 - [10주차 (2026-11-11)](#10주차-2026-11-11) — Context provider 코드 상세(useEffect·의존성 배열·data-theme), CSS 속성 선택자, 동작 흐름, 외부(서드 파티) component
 - [9주차 (2026-11-04)](#9주차-2026-11-04) — Server → Client 데이터 전달·직렬화, Interleaving(ClientLayout + ServerContent), Context / Context provider(테마 토글)
 - [8주차 (2026-10-28)](#8주차-2026-10-28) — src 디렉토리 관리, Server → Client props 전달, LikeButton 낙관적 업데이트, JS 번들 크기 줄이기
@@ -34,9 +35,13 @@ src/
 │ ├ ClientLayout.tsx      // 'use client' children 슬롯을 가진 레이아웃 (interleaving)
 │ ├ ServerContent.tsx     // Server Component, jsonplaceholder에서 데이터 fetch
 │ ├ ThemeProvider.tsx     // 'use client' ThemeContext + theme 상태/toggle 제공
-│ └ ThemeStatus.tsx       // 'use client' useContext로 테마 토글 버튼
+│ ├ ThemeStatus.tsx       // 'use client' useContext로 테마 토글 버튼
+│ ├ gallery.tsx           // 'use client' acme-carousel Carousel (picsum 이미지)
+│ ├ styles.css            // acme-carousel 스타일 복사본
+│ └ posts.tsx             // 'use client' use(posts)로 promise 읽어 목록 출력
 ├ lib/
-│ └ data.tsx              // posts 더미 데이터 (id, likes, title, content)
+│ ├ data.tsx              // posts 더미 데이터 (id, likes, title, content)
+│ └ getPosts.tsx          // fetch(url).then(r => r.json()) promise 반환
 ├ ui/
 │ └ LikeButton.tsx        // 'use client' 좋아요 버튼 (낙관적 업데이트)
 └ app/
@@ -48,6 +53,7 @@ src/app/
 ├ [id]/page.tsx           // /nextjs  post 제목 + LikeButton
 ├ counter/page.tsx        // /counter  Counter 컴포넌트 호출
 ├ interleaved/page.tsx    // /interleaved  <ClientLayout><ServerContent /></ClientLayout>
+├ carousel/page.tsx       // /carousel  <Gallery /> (외부 component)
 ├ (marketing)/
 │ ├ layout.tsx
 │ └ about/page.tsx        // /about
@@ -63,11 +69,72 @@ src/app/
 │ ├ page.tsx              // /blog3         블로그 목록
 │ ├ posts.tsx             // 더미 데이터
 │ └ [slug]/page.tsx       // /blog3/nextjs  generateStaticParams로 빌드 시 정적 생성
+├ blog4/
+│ └ page.tsx              // /blog4  getPosts promise → <Suspense><Posts /></Suspense>
 ├ contact/
 │ └ page.tsx              // /contact  <a> 태그로 이동 (prefetch 없음)
 └ products/
   └ page.tsx              // /products?id=123&name=foo
 ```
+
+---
+
+## 11주차 (2026-11-18)
+
+### 1. 외부(서드 파티) component 실습 (`acme-carousel`)
+- `pnpm add acme-carousel`로 설치하고 `components/gallery.tsx`(`'use client'`)에서 `<Carousel />`을 쓴다. `app/carousel/page.tsx`(Server Component)에서는 `<Gallery />`만 불러온다
+- `items`는 필수 prop이라 picsum.photos 더미 이미지로 배열을 만든다 (`https://picsum.photos/id/{번호}/800/600`)
+- 이미지가 한 페이지에 다 나오는 건 스타일이 적용 안 된 것이다. `node_modules/acme-carousel/dist/styles.css`를 components로 복사하고 `import './styles.css'` 했다
+  - 파일이 없는데 import만 하면 `Module not found`로 **500 Internal Server Error**가 난다
+- npm 문서의 Carousel Props: `autoplay={{ enabled: true, interval: 5000, pauseOnHover: true }}`, `infinite`, `navigation`, `pagination`, `touch` 등으로 자동 전환·네비게이션을 설정할 수 있다
+
+```tsx
+// components/gallery.tsx
+'use client'
+import './styles.css'
+import { Carousel } from 'acme-carousel'
+
+export default function Gallery() {
+  const items = [
+    { src: 'https://picsum.photos/id/1015/800/600', alt: 'Landscape 1' },
+    // ...
+  ]
+  return <Carousel items={items} />
+}
+```
+
+### 2. 라이브러리 작성자를 위한 조언
+- 컴포넌트 라이브러리를 만들 때 client 전용 기능을 쓰는 진입점에 `"use client"`를 붙이면, 사용자가 래퍼 없이 Server Component에서 바로 쓸 수 있다
+- 일부 번들러는 `"use client"`를 제거할 수 있다 (React Wrap Balancer, Vercel Analytics의 esbuild 설정 참고)
+
+### 3. 환경 변수 노출 예방
+- JS 모듈은 Server / Client Component가 같이 쓸 수 있어서, `process.env.API_KEY` 같은 **서버 전용 코드가 실수로 client로 갈 수 있다**
+- Next.js는 `NEXT_PUBLIC_` 접두사가 붙은 환경 변수만 client 번들에 넣고, 나머지는 빈 문자열로 바꾼다 → client에서 실행은 되지만 제대로 동작하지 않는다
+- 서버 전용 파일 맨 위에 `import 'server-only'`를 쓰면 client에서 import 할 때 **빌드 타임 오류**가 난다. 반대로 `window` 등을 쓰는 모듈은 `client-only`로 표시한다
+
+### 4. Fetching Data (데이터 가져오기)
+- **Server Component**: ① fetch API ② ORM / 데이터베이스. 컴포넌트를 `async` 함수로 만들고 `await fetch()` 한다
+  - ORM(Object Relational Mapping): 객체 지향 언어와 관계형 DB 사이 데이터를 자동으로 변환해주는 기술
+- fetch 응답은 기본적으로 캐싱되지 않는다. 동적 렌더링은 `{ cache: 'no-store' }`, 같은 fetch 요청은 컴포넌트 트리 안에서 자동으로 memoize 된다
+- **Client Component**: ① React `use` Hook ② SWR / React Query 같은 통신 라이브러리
+  - Client Component는 `async`가 안 돼서 렌더링 중에 직접 fetch 할 수 없다 → 서버에서 **await 하지 않은 promise를 prop으로 넘기고**, client에서 `use(promise)`로 읽는다
+
+```tsx
+// app/blog4/page.tsx (Server)
+const posts = getPosts('https://jsonplaceholder.typicode.com/posts') // await X
+return (
+  <Suspense fallback={<div>Loading...</div>}>
+    <Posts posts={posts} />
+  </Suspense>
+)
+
+// components/posts.tsx (Client)
+'use client'
+const allPosts = use(posts)
+```
+
+- 라우팅 페이지가 아닌 일반 컴포넌트는 `src/components/`에 모으고, 필요하면 `components/ui`처럼 하위 폴더로 관리한다
+- 선생님 프로젝트는 `/blog`에 만들었지만, 여기서는 기존 `/blog`를 유지하려고 `/blog4`로 만들었다
 
 ---
 

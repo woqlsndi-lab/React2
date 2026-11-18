@@ -22,6 +22,7 @@ export default function RootLayout({
           <Link href="/blog">Blog</Link> |&nbsp;
           <Link href="/blog2">Blog2</Link> |&nbsp;
           <Link href="/blog3">Blog3</Link> |&nbsp;
+          <Link href="/blog4">Blog4</Link> |&nbsp;
           {/* No prefetching */}
           <a href="/contact">Contact</a> |&nbsp;
           <Link href="/counter">Counter</Link>
@@ -33,7 +34,8 @@ export default function RootLayout({
           <Link href="/nextjs">nextjs</Link>&nbsp;|&nbsp;
           <Link href="/routing">routing</Link>&nbsp;|&nbsp;
           <Link href="/ssr-ssg">ssr-sge</Link>&nbsp;|&nbsp;
-          <Link href="/dynamic-routes">dynamic-routes</Link>
+          <Link href="/dynamic-routes">dynamic-routes</Link>&nbsp;|&nbsp;
+          <Link href="/carousel">carousel</Link>
           <br />
         </nav>
         <br />
