@@ -5,6 +5,7 @@ Next.js(App Router) 수업 정리 및 실습 저장소
 ## 목차
 - [실행 방법](#실행-방법)
 - [실습 파일](#실습-파일)
+- [12주차 (2026-11-25)](#12주차-2026-11-25) — Fetch·Promise 이해, Suspense, Promise 타입 params, getPosts 라이브러리 분리, SWR + 제네릭, 요청 메모이제이션·데이터 캐시
 - [11주차 (2026-11-18)](#11주차-2026-11-18) — 외부 component(acme-carousel) 실습, 환경 변수 노출 예방(server-only), Fetching Data(use Hook + Suspense 스트리밍)
 - [10주차 (2026-11-11)](#10주차-2026-11-11) — Context provider 코드 상세(useEffect·의존성 배열·data-theme), CSS 속성 선택자, 동작 흐름, 외부(서드 파티) component
 - [9주차 (2026-11-04)](#9주차-2026-11-04) — Server → Client 데이터 전달·직렬화, Interleaving(ClientLayout + ServerContent), Context / Context provider(테마 토글)
@@ -63,6 +64,7 @@ src/app/
 │ ├ posts.tsx             // 더미 데이터
 │ └ [slug]/page.tsx       // /blog/nextjs  블로그 상세
 ├ blog2/
+│ ├ page.tsx              // /blog2  'use client' useSWR<Photo[]>로 photos 제목 목록
 │ ├ posts.tsx             // 더미 데이터
 │ └ [slug]/page.tsx       // /blog2/nextjs  generateStaticParams 없이 런타임 처리
 ├ blog3/
@@ -76,6 +78,66 @@ src/app/
 └ products/
   └ page.tsx              // /products?id=123&name=foo
 ```
+
+---
+
+## 12주차 (2026-11-25)
+
+### 1. Fetch와 Promise 이해
+- `fetch(url)`은 브라우저 Fetch API로, 기본은 GET 요청이고 `Promise<Response>`를 반환한다. 두 번째 인자로 `method`, `headers`, `body` 등 옵션을 넘긴다
+- HTTP 상태가 4xx/5xx여도 Promise는 reject 되지 않는다. 네트워크 오류가 아니면 resolve 되므로 404, 500은 **따로 예외처리**해야 한다
+- `.then((res) => ...)`의 `res`는 응답 객체다. `res.ok`는 200~299인지(Boolean), `res.status`는 상태 코드 숫자다
+- `res.json()`은 body를 JSON으로 파싱하는 비동기 함수라 또 Promise를 반환한다. body는 **한 번만** 읽을 수 있다 (`json()` 또는 `text()` 중 하나)
+- `new Promise((resolve, reject) => ...)`에서 성공하면 `resolve`, 실패하면 `reject`를 호출한다. `resolve(value)`를 부르면 상태가 fulfilled가 되고 값이 `.then()`으로 전달된다
+- 이미 있는 값을 바로 이행된 Promise로 감쌀 때는 `Promise.resolve(값)`을 쓴다
+
+| 구성 요소 | 소속 | 설명 |
+|---|---|---|
+| `fetch()` | 전역 함수(Web API) | HTTP 요청, `Promise<Response>` 반환 |
+| `.then()` | Promise 메서드 | Promise가 완료되면 callback 실행 |
+| `.json()` | Response 메서드 | body를 JSON으로 바꾸는 또 다른 Promise 반환 |
+
+### 2. Suspense와 Promise 타입
+- `Suspense`는 비동기 작업 중에 UI 일부를 fallback으로 보여주는 React 기능이다. 안에 컴포넌트가 여러 개면 하나라도 로딩 중일 때 fallback이 나오고, 모두 끝나면 한 번에 실제 UI가 보인다
+- Next.js 15.1부터 `params`, `searchParams`, `headers`, `cookies` 같은 내부 API가 **Promise**로 바뀌었다 → `params.id` 대신 `const { id } = await params`
+- RSC와 스트리밍 렌더링에 맞춰 데이터 소스를 지연(lazy) 처리해서 요청을 병렬로 더 빠르게 처리하기 위해서다
+
+### 3. getPosts 라이브러리 분리와 데이터 흐름
+- 실무에선 cache 설정, API Key, 예외처리 등으로 fetch가 복잡해지므로 `src/lib/getPosts.tsx`로 분리하고 URL은 매개변수로 받는다 (11주차 `blog4`에서 이미 이렇게 만들었다)
+- 흐름: blog 접속 → `getPosts(url)` 호출 → Promise를 `<Posts>`에 props로 전달 → 받는 동안 `Suspense` fallback → `Posts`에서 `use()`로 데이터 저장 → `map`으로 목록 렌더링
+
+### 4. 커뮤니티 라이브러리 (SWR) 실습 (`blog2`)
+- Client Component에서는 SWR, React Query 같은 라이브러리로 데이터를 가져올 수 있다. `pnpm add swr`로 설치했다
+- SWR(Stale-While-Revalidate)은 Vercel이 만든 라이브러리로, 캐시된 데이터를 먼저 보여주고 백그라운드에서 최신 데이터를 다시 가져와 화면을 갱신한다
+- `fetcher`의 `url`에 타입이 없으면 `implicitly has an 'any' type` 오류가 나서 `(url: string)`으로 지정한다
+- 그냥 두면 결과가 `Promise<any>`로 추론돼 타입 안전성이 떨어진다 → **제네릭** `<T,>`로 반환 타입을 `Promise<T>`로 명시한다 (`,`는 JSX 문법과 충돌을 피하려고 붙임)
+- `useSWR`은 data 타입을 추론하지 않아서 `'data' is of type 'unknown'` 오류가 난다 → `useSWR<Photo[]>`처럼 타입을 넘기고, 처음엔 undefined일 수 있어서 `data?.map`(옵셔널 체이닝)을 쓴다
+
+```tsx
+// app/blog2/page.tsx
+'use client'
+import useSWR from 'swr'
+
+const fetcher = <T,>(url: string): Promise<T> => fetch(url).then((r) => r.json())
+type Photo = { id: string; title: string }
+
+export default function Blog2Page() {
+  const { data, error, isLoading } = useSWR<Photo[]>(
+    'https://jsonplaceholder.typicode.com/photos',
+    fetcher
+  )
+  if (isLoading) return <div>Loading...</div>
+  if (error) return <div>Error: {error.message}</div>
+  // data?.map((post) => <li key={post.id}>{post.title}</li>)
+}
+```
+
+- 기존 `blog2`에는 `[slug]` 상세만 있어서 메뉴의 Blog2 링크가 404였는데, 이번에 `blog2/page.tsx`를 만들었다
+
+### 5. 중복된 요청 제거 및 데이터 캐시
+- **요청 메모이제이션**: 한 번의 렌더링 과정에서 같은 URL·옵션의 GET/HEAD fetch는 하나의 요청으로 합쳐진다. 자동으로 되고, Abort 신호로 취소(opt out)할 수 있다
+- fetch 옵션에 `cache: 'force-cache'`를 주면 Next.js 데이터 캐시로 중복을 없앨 수 있다
+- fetch 대신 ORM/DB를 직접 쓰면 React `cache()`로 함수를 감싼다 (예: `getPost = cache(async (id) => db.query.posts.findFirst(...))`). 실행하려면 DB 연결 설정이 필요하다
 
 ---
 
